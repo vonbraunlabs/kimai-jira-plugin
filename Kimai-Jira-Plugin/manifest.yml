@@ -1,0 +1,39 @@
+modules:
+  jira:issueContext:
+    - key: kimai-jira-plugin-time-tracking-panel
+      label: Powered by VBL
+      resource: main
+      resolver:
+        function: resolver
+      render: native
+      title: Kimai Time Tracking
+      icon: https://developer.atlassian.com/platform/forge/images/icons/issue-panel-icon.svg
+  jira:adminPage:
+    - key: kimai-admin-settings
+      resource: admin
+      resolver:
+        function: resolver
+      render: native
+      title: Kimai Time Tracking
+  function:
+    - key: resolver
+      handler: index.handler
+resources:
+  - key: main
+    path: src/frontend/index.jsx
+  - key: admin
+    path: src/frontend/AdminSettings.jsx
+app:
+  runtime:
+    name: nodejs24.x
+    memoryMB: 256
+    architecture: arm64
+  id: ari:cloud:ecosystem::app/ec0fe689-49d7-4b18-92d8-f9a78fb2af92
+permissions:
+  scopes:
+    - storage:app
+    - read:jira-work
+  external:
+    fetch:
+      backend:
+        - address: "*"
