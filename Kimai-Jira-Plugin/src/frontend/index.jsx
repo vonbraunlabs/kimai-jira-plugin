@@ -36,7 +36,6 @@ import {
   fetchIssueContext,
   formatDuration,
   formatKimaiDuration,
-  fromKimaiCode,
 } from './jira';
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
@@ -52,10 +51,7 @@ const toKimaiDatetime = (date, time) => `${date}T${time}:00`;
 
 const toOption = (item) => ({ label: item.name, value: item.id });
 
-// Activities use fromKimaiCode so that digits-only codes stored in Kimai
-// (e.g. "0339301") are displayed as full deliverable codes ("GPV0339-ME3-E01").
-// Regular activity names (e.g. "Development") are returned unchanged.
-const toActivityOption = (item) => ({ label: fromKimaiCode(item.name), value: item.id });
+const toActivityOption = (item) => ({ label: item.name, value: item.id });
 
 // ─── ProjectActivitySelects ───────────────────────────────────────────────────
 // Reusable pair of selects that reloads activities when the project changes.
@@ -411,7 +407,7 @@ const TimesheetHistory = ({ timesheets, onDelete }) => {
             key: 'context',
             content: (
               <Text>
-                {ts.project?.name ?? ts.project} / {fromKimaiCode(ts.activity?.name ?? String(ts.activity ?? ''))}
+                {ts.project?.name ?? ts.project} / {ts.activity?.name ?? String(ts.activity ?? '')}
               </Text>
             ),
           },
@@ -452,6 +448,7 @@ const App = () => {
   const [autoProject, setAutoProject] = useState(null);
   const [autoActivity, setAutoActivity] = useState(null);
   const [issueSummary, setIssueSummary] = useState('');
+  const [mappingConfig, setMappingConfig] = useState(null);
   const [activeTimer, setActiveTimer] = useState(null);
   const [elapsed, setElapsed] = useState(0);
   const [timesheets, setTimesheets] = useState([]);
@@ -477,11 +474,12 @@ const App = () => {
         // the effect re-runs when useProductContext delivers the key.
         if (!issueKey) return;
 
-        const [issue, projectsList, activeTimerData, tsList] = await Promise.all([
+        const [issue, projectsList, activeTimerData, tsList, mappingConfigData] = await Promise.all([
           fetchIssueContext(issueKey),
           invoke('getKimaiProjects'),
           invoke('getActiveTimer'),
           invoke('getIssueTimesheets', { issueKey }),
+          invoke('getMappingConfig'),
         ]);
 
         const pList = projectsList ?? [];
@@ -489,6 +487,7 @@ const App = () => {
         setActiveTimer(activeTimerData);
         setTimesheets(tsList ?? []);
         setIssueSummary(issue.summary ?? '');
+        setMappingConfig(mappingConfigData ?? null);
 
         const detectedProject = autoDetectProject(pList, issue.projectName);
         setAutoProject(detectedProject);
@@ -497,7 +496,7 @@ const App = () => {
           'getKimaiActivities',
           detectedProject ? { projectId: detectedProject.id } : undefined,
         );
-        const detectedActivity = autoDetectActivity(actList ?? [], issue.epicName, issue.labels);
+        const detectedActivity = autoDetectActivity(actList ?? [], issue.epicName, issue.labels, mappingConfigData);
         setAutoActivity(detectedActivity);
 
         setView('main');
@@ -617,7 +616,7 @@ const App = () => {
       <Heading size="xlarge">{formatDuration(elapsed)}</Heading>
       <Stack space="space.050">
         <Text>{activeTimer.project?.name ?? ''}</Text>
-        <Text>{fromKimaiCode(activeTimer.activity?.name ?? '')}</Text>
+        <Text>{activeTimer.activity?.name ?? ''}</Text>
         {activeTimer.description ? <Text>{activeTimer.description}</Text> : null}
       </Stack>
       <LoadingButton

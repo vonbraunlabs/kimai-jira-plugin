@@ -5,6 +5,7 @@ import * as kimai from '../kimai/client';
 const resolver = new Resolver();
 
 const KIMAI_URL_KEY = 'kimai_base_url';
+const MAPPING_CONFIG_KEY = 'activity_mapping_config';
 const userKeyId = (accountId) => `user_apikey_${accountId}`;
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
@@ -121,6 +122,42 @@ resolver.define('getContext', async (req) => {
     kimaiUrlConfigured: !!kimaiUrl,
     apiKeyConfigured: !!apiKey,
   };
+});
+
+// ─── Activity mapping config ──────────────────────────────────────────────────
+
+resolver.define('getMappingConfig', async () => {
+  const config = await kvs.get(MAPPING_CONFIG_KEY);
+  console.log(`[resolver] getMappingConfig → enabled=${config?.enabled ?? false}`);
+  return config ?? null;
+});
+
+resolver.define('saveMappingConfig', async (req) => {
+  const { enabled, extraction } = req.payload ?? {};
+  console.log(`[resolver] saveMappingConfig enabled=${enabled}`);
+
+  if (enabled) {
+    const { pattern = '', flags = '' } = extraction ?? {};
+    try {
+      // eslint-disable-next-line no-new-regexp
+      new RegExp(pattern, flags);
+    } catch (e) {
+      console.warn(`[resolver] saveMappingConfig invalid regex: ${e.message}`);
+      return { success: false, errors: { extractionPattern: `Regex inválida: ${e.message}` } };
+    }
+  }
+
+  const config = {
+    enabled: !!enabled,
+    extraction: {
+      pattern: extraction?.pattern ?? '\\D',
+      flags: extraction?.flags ?? 'g',
+      replacement: extraction?.replacement ?? '',
+    },
+  };
+  await kvs.set(MAPPING_CONFIG_KEY, config);
+  console.log(`[resolver] saveMappingConfig → saved`);
+  return { success: true };
 });
 
 // ─── Kimai data resolvers ─────────────────────────────────────────────────────

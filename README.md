@@ -179,24 +179,50 @@ Kimai-Jira-Plugin/
 
 ---
 
-## Activity code mapping
+## Configuring activity code mapping
 
-This plugin handles a custom mapping between Jira label codes and Kimai activity codes.
+The plugin uses the **Categorias** field of the Jira card (`labels` in the REST API) to auto-detect the corresponding Kimai activity. By default, the label value is compared directly against Kimai activity names — no transformation is applied.
 
-**Background:** Kimai activity codes are limited to 10 characters (digits only). Our deliverable codes use the format `GPV{project}-ME{milestone}-E{deliverable}` (e.g. `GPV0339-ME3-E01`), which exceeds that limit when stored as-is.
+If your team stores activities in Kimai using a code derived from the label (e.g. by stripping separators), you can configure a regex-based extraction rule in the admin page.
 
-**Solution:** Strip all non-digit characters before storing in Kimai:
+### How it works
 
-| Jira label | Kimai activity code |
+The flow is always:
+
+```
+Jira label  →  [extraction regex]  →  code  →  [Kimai API lookup]  →  activity name
+```
+
+1. The extraction regex transforms each label value into the code used to search in Kimai.
+2. The Kimai API returns the matching activity with its stored name.
+3. The activity name displayed in the panel is always whatever is stored in Kimai.
+
+### Configuring in the admin page
+
+1. Go to **Settings → Apps → Kimai Time Tracking**.
+2. Under **Mapeamento de atividades**, enable **Habilitar conversão de código**.
+3. Fill in the three regex fields:
+
+| Field | Description | Example |
+|---|---|---|
+| **Padrão (regex)** | Characters/pattern to match in the label | `\D` |
+| **Flags** | JS regex flags | `g` |
+| **Substituição** | Replacement string (`$1`, `$2`… for groups) | *(empty)* |
+
+4. Use the **Pré-visualização** field to test your regex live before saving.
+5. Click **Salvar mapeamento**.
+
+### Example: digits-only codes
+
+Some teams store activities in Kimai using only the numeric portion of a longer code. For example, the Jira label `GPV0339-ME3-E01` maps to a Kimai activity named `0339301`.
+
+| Field | Value |
 |---|---|
-| `GPV0339-ME3-E01` | `0339301` |
-| `GPV0339-ME9999-E01` | `033999901` |
+| Padrão (regex) | `\D` |
+| Flags | `g` |
+| Substituição | *(empty)* |
 
-The plugin converts automatically in both directions:
-- **Auto-detection:** converts Jira labels to digits before matching Kimai activities
-- **Display:** converts digits-only codes back to the full `GPV…-ME…-E…` format in the panel
-
-If your team uses a different code scheme, update `toKimaiCode` and `fromKimaiCode` in `src/frontend/jira.js`.
+This strips every non-digit character from the label (`GPV0339-ME3-E01` → `0339301`) and uses the result to find the activity in Kimai.
 
 ---
 
@@ -206,8 +232,7 @@ If your team uses a different code scheme, update `toKimaiCode` and `fromKimaiCo
 |---|---|---|
 | A | Wildcard egress (`address: "*"`) required because the Kimai URL is set at runtime | Needs review for Atlassian Marketplace submission; fine for internal/single-site use |
 | B | No handling when a timer is already running on a **different** issue — user must stop it manually in Kimai or in the other issue's panel | UX only |
-| C | Activity code reverse-mapping assumes the fixed format `GPV{4d}-ME{1–4d}-E{2d}` | Update `fromKimaiCode` in `jira.js` if your format differs |
-| D | "Categorias" field mapped to Jira `labels` — confirm with `GET /rest/api/3/field` on your instance if auto-detection doesn't work | Auto-detection |
+| C | "Categorias" field mapped to Jira `labels` — confirm with `GET /rest/api/3/field` on your instance if auto-detection doesn't work | Auto-detection |
 
 ---
 
