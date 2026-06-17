@@ -128,9 +128,33 @@ export const autoDetectActivity = (activities, epicName, labels) => {
   );
 };
 
+// Adds a worklog entry to the Jira issue.
+// Silently skips if duration < 60 s (Jira minimum) or issueKey is missing.
+export const addJiraWorklog = async (issueKey, timeSpentSeconds, begin, description) => {
+  if (!issueKey || timeSpentSeconds < 60) return;
+
+  // Jira expects "YYYY-MM-DDTHH:mm:ss.SSS+0000" — convert whatever begin format we have to UTC.
+  const started = new Date(begin).toISOString().replace(/Z$/, '+0000');
+
+  const body = { timeSpentSeconds: Math.round(timeSpentSeconds), started };
+  if (description) {
+    body.comment = {
+      type: 'doc',
+      version: 1,
+      content: [{ type: 'paragraph', content: [{ type: 'text', text: description }] }],
+    };
+  }
+
+  await requestJira(`/rest/api/3/issue/${issueKey}/worklog`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify(body),
+  });
+};
+
 // Formats elapsed milliseconds as HH:MM:SS for the live timer display.
 export const formatDuration = (ms) => {
-  const s = Math.floor(ms / 1000);
+  const s = Math.floor(Math.max(0, ms) / 1000);
   const h = Math.floor(s / 3600);
   const m = Math.floor((s % 3600) / 60);
   const sec = s % 60;

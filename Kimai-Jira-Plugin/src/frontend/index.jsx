@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import ForgeReconciler, {
+  Box,
   Button,
   ButtonGroup,
   DatePicker,
@@ -29,6 +30,7 @@ import ForgeReconciler, {
 } from '@forge/react';
 import { invoke } from '@forge/bridge';
 import {
+  addJiraWorklog,
   autoDetectActivity,
   autoDetectProject,
   fetchIssueContext,
@@ -209,17 +211,24 @@ const TimerStartModal = ({
   const [activity, setActivity] = useState(initialActivity ?? null);
   const [description, setDescription] = useState(defaultDescription ?? '');
   const [starting, setStarting] = useState(false);
+  const [startError, setStartError] = useState(null);
 
   const handleStart = async () => {
     if (!project || !activity) return;
     setStarting(true);
-    await onStart({
-      projectId: project.id,
-      activityId: activity.id,
-      description,
-      issueKey,
-    });
-    setStarting(false);
+    setStartError(null);
+    try {
+      await onStart({
+        projectId: project.id,
+        activityId: activity.id,
+        description,
+        issueKey,
+      });
+    } catch (e) {
+      setStartError(e.message ?? 'Erro ao iniciar o timer.');
+    } finally {
+      setStarting(false);
+    }
   };
 
   return (
@@ -248,19 +257,26 @@ const TimerStartModal = ({
           </Stack>
         </ModalBody>
         <ModalFooter>
-          <ButtonGroup>
-            <Button appearance="subtle" onClick={onClose}>
-              Cancelar
-            </Button>
-            <LoadingButton
-              appearance="primary"
-              isLoading={starting}
-              isDisabled={!project || !activity}
-              onClick={handleStart}
-            >
-              Iniciar
-            </LoadingButton>
-          </ButtonGroup>
+          <Stack space="space.100">
+            {startError && (
+              <SectionMessage appearance="error" title="Erro ao iniciar">
+                <Text>{startError}</Text>
+              </SectionMessage>
+            )}
+            <ButtonGroup>
+              <Button appearance="subtle" onClick={onClose}>
+                Cancelar
+              </Button>
+              <LoadingButton
+                appearance="primary"
+                isLoading={starting}
+                isDisabled={!project || !activity}
+                onClick={handleStart}
+              >
+                Iniciar
+              </LoadingButton>
+            </ButtonGroup>
+          </Stack>
         </ModalFooter>
       </Modal>
     </ModalTransition>
@@ -525,6 +541,12 @@ const App = () => {
     setStoppingTimer(true);
     try {
       await invoke('stopTimer', { timesheetId: activeTimer.id });
+      await addJiraWorklog(
+        issueKey,
+        Math.round(elapsed / 1000),
+        activeTimer.begin,
+        activeTimer.description,
+      );
       setActiveTimer(null);
       const tList = await invoke('getIssueTimesheets', { issueKey });
       setTimesheets(tList ?? []);
@@ -536,6 +558,8 @@ const App = () => {
   const handleManualAdd = useCallback(
     async (payload) => {
       await invoke('createManualEntry', payload);
+      const seconds = (new Date(payload.end) - new Date(payload.begin)) / 1000;
+      await addJiraWorklog(issueKey, seconds, payload.begin, payload.description);
       const tList = await invoke('getIssueTimesheets', { issueKey });
       setTimesheets(tList ?? []);
     },
@@ -590,15 +614,12 @@ const App = () => {
 
   const timerSection = activeTimer ? (
     <Stack space="space.150">
-      <Inline space="space.200" alignBlock="center">
-        <Heading size="xlarge">{formatDuration(elapsed)}</Heading>
-        <Stack space="space.050">
-          <Text>
-            {activeTimer.project?.name ?? ''} / {fromKimaiCode(activeTimer.activity?.name ?? '')}
-          </Text>
-          {activeTimer.description ? <Text>{activeTimer.description}</Text> : null}
-        </Stack>
-      </Inline>
+      <Heading size="xlarge">{formatDuration(elapsed)}</Heading>
+      <Stack space="space.050">
+        <Text>{activeTimer.project?.name ?? ''}</Text>
+        <Text>{fromKimaiCode(activeTimer.activity?.name ?? '')}</Text>
+        {activeTimer.description ? <Text>{activeTimer.description}</Text> : null}
+      </Stack>
       <LoadingButton
         appearance="danger"
         isLoading={stoppingTimer}
@@ -608,11 +629,9 @@ const App = () => {
       </LoadingButton>
     </Stack>
   ) : (
-    <Stack space="space.150">
-      <Button appearance="primary" onClick={() => setShowTimerModal(true)}>
-        Iniciar timer
-      </Button>
-    </Stack>
+    <Button appearance="primary" onClick={() => setShowTimerModal(true)}>
+      Iniciar timer
+    </Button>
   );
 
   return (
@@ -625,18 +644,22 @@ const App = () => {
         </TabList>
 
         <TabPanel>
-          {timerSection}
+          <Box paddingBlockStart="space.200">
+            {timerSection}
+          </Box>
         </TabPanel>
 
         <TabPanel>
-          <ManualEntryForm
-            projects={projects}
-            initialProject={autoProject}
-            initialActivity={autoActivity}
-            defaultDescription={issueSummary}
-            issueKey={issueKey}
-            onAdd={handleManualAdd}
-          />
+          <Box paddingBlockStart="space.200">
+            <ManualEntryForm
+              projects={projects}
+              initialProject={autoProject}
+              initialActivity={autoActivity}
+              defaultDescription={issueSummary}
+              issueKey={issueKey}
+              onAdd={handleManualAdd}
+            />
+          </Box>
         </TabPanel>
       </Tabs>
 

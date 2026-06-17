@@ -103,7 +103,7 @@ export const getTimesheetsByTag = (baseUrl, apiKey, issueKey) => {
 
 // Starts a running timer. Begin defaults to now (UTC). No end time = open entry.
 export const startTimer = (baseUrl, apiKey, { projectId, activityId, description, issueKey }) => {
-  const begin = new Date().toISOString().slice(0, 19); // "2024-01-01T09:00:00"
+  const begin = new Date().toISOString().slice(0, 19) + 'Z'; // "2024-01-01T09:00:00Z"
   return request(baseUrl, apiKey, '/timesheets', 'POST', {
     begin,
     project: projectId,
@@ -115,7 +115,7 @@ export const startTimer = (baseUrl, apiKey, { projectId, activityId, description
 
 // Stops a running timer by patching its end time to now (UTC).
 export const stopTimer = (baseUrl, apiKey, timesheetId) => {
-  const end = new Date().toISOString().slice(0, 19);
+  const end = new Date().toISOString().slice(0, 19) + 'Z'; // "2024-01-01T09:00:00Z"
   return request(baseUrl, apiKey, `/timesheets/${timesheetId}`, 'PATCH', { end });
 };
 
