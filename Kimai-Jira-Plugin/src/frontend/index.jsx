@@ -53,6 +53,8 @@ const toOption = (item) => ({ label: item.name, value: item.id });
 
 const toActivityOption = (item) => ({ label: item.name, value: item.id });
 
+const isAuthError = (e) => e?.message?.includes('[AUTH_INVALID]');
+
 // ─── ProjectActivitySelects ───────────────────────────────────────────────────
 // Reusable pair of selects that reloads activities when the project changes.
 // Calls onProjectChange/onActivityChange on mount with the initial values so
@@ -146,7 +148,7 @@ const ProjectActivitySelects = ({
 
 // ─── ApiKeySetup ──────────────────────────────────────────────────────────────
 
-const ApiKeySetup = ({ onSaved }) => {
+const ApiKeySetup = ({ onSaved, isInvalid = false }) => {
   const [apiKey, setApiKey] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
@@ -166,8 +168,15 @@ const ApiKeySetup = ({ onSaved }) => {
 
   return (
     <Stack space="space.200">
-      <Heading size="small">Configure sua API Key do Kimai</Heading>
-      <Text>Para registrar horas, insira sua chave de API pessoal do Kimai.</Text>
+      {isInvalid && (
+        <SectionMessage appearance="warning" title="API Key inválida ou expirada">
+          <Text>Sua API Key do Kimai não é mais válida. Insira uma nova chave para continuar.</Text>
+        </SectionMessage>
+      )}
+      <Heading size="small">
+        {isInvalid ? 'Atualizar API Key do Kimai' : 'Configure sua API Key do Kimai'}
+      </Heading>
+      {!isInvalid && <Text>Para registrar horas, insira sua chave de API pessoal do Kimai.</Text>}
       <Text>Como obter: no Kimai, acesse seu Perfil → API → Gerar token.</Text>
       <Label labelFor="api-key-input">API Key</Label>
       <Textfield
@@ -501,8 +510,12 @@ const App = () => {
 
         setView('main');
       } catch (e) {
-        setErrorMsg(e.message ?? 'Erro ao inicializar o painel.');
-        setView('error');
+        if (isAuthError(e)) {
+          setView('invalid-key');
+        } else {
+          setErrorMsg(e.message ?? 'Erro ao inicializar o painel.');
+          setView('error');
+        }
       }
     };
 
@@ -529,11 +542,20 @@ const App = () => {
   // ── Actions ──────────────────────────────────────────────────────────────────
 
   const handleTimerStart = async (payload) => {
-    const entry = await invoke('startTimer', payload);
-    setActiveTimer(entry);
-    setShowTimerModal(false);
-    const tList = await invoke('getIssueTimesheets', { issueKey });
-    setTimesheets(tList ?? []);
+    try {
+      const entry = await invoke('startTimer', payload);
+      setActiveTimer(entry);
+      setShowTimerModal(false);
+      const tList = await invoke('getIssueTimesheets', { issueKey });
+      setTimesheets(tList ?? []);
+    } catch (e) {
+      if (isAuthError(e)) {
+        setShowTimerModal(false);
+        setView('invalid-key');
+        return;
+      }
+      throw e;
+    }
   };
 
   const handleTimerStop = async () => {
@@ -549,6 +571,12 @@ const App = () => {
       setActiveTimer(null);
       const tList = await invoke('getIssueTimesheets', { issueKey });
       setTimesheets(tList ?? []);
+    } catch (e) {
+      if (isAuthError(e)) {
+        setView('invalid-key');
+      } else {
+        throw e;
+      }
     } finally {
       setStoppingTimer(false);
     }
@@ -556,18 +584,34 @@ const App = () => {
 
   const handleManualAdd = useCallback(
     async (payload) => {
-      await invoke('createManualEntry', payload);
-      const seconds = (new Date(payload.end) - new Date(payload.begin)) / 1000;
-      await addJiraWorklog(issueKey, seconds, payload.begin, payload.description);
-      const tList = await invoke('getIssueTimesheets', { issueKey });
-      setTimesheets(tList ?? []);
+      try {
+        await invoke('createManualEntry', payload);
+        const seconds = (new Date(payload.end) - new Date(payload.begin)) / 1000;
+        await addJiraWorklog(issueKey, seconds, payload.begin, payload.description);
+        const tList = await invoke('getIssueTimesheets', { issueKey });
+        setTimesheets(tList ?? []);
+      } catch (e) {
+        if (isAuthError(e)) {
+          setView('invalid-key');
+          return;
+        }
+        throw e;
+      }
     },
     [issueKey],
   );
 
   const handleDelete = useCallback(async (timesheetId) => {
-    await invoke('deleteEntry', { timesheetId });
-    setTimesheets((prev) => prev.filter((ts) => ts.id !== timesheetId));
+    try {
+      await invoke('deleteEntry', { timesheetId });
+      setTimesheets((prev) => prev.filter((ts) => ts.id !== timesheetId));
+    } catch (e) {
+      if (isAuthError(e)) {
+        setView('invalid-key');
+        return;
+      }
+      throw e;
+    }
   }, []);
 
   const handleApiKeySaved = () => setInitKey((k) => k + 1);
@@ -596,6 +640,10 @@ const App = () => {
 
   if (view === 'setup-key') {
     return <ApiKeySetup onSaved={handleApiKeySaved} />;
+  }
+
+  if (view === 'invalid-key') {
+    return <ApiKeySetup onSaved={handleApiKeySaved} isInvalid />;
   }
 
   if (view === 'error') {
@@ -667,6 +715,10 @@ const App = () => {
         <Heading size="small">Histórico do issue</Heading>
         <TimesheetHistory timesheets={timesheets} onDelete={handleDelete} />
       </Stack>
+
+      <Button appearance="subtle" onClick={() => setView('invalid-key')}>
+        Trocar API Key
+      </Button>
 
       {showTimerModal && (
         <TimerStartModal
