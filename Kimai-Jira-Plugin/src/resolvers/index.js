@@ -18,13 +18,22 @@ const getConfig = (accountId) =>
 
 // Fetches config, asserts both values are present, then calls fn(url, key).
 // Throws descriptive errors that the frontend can surface to the user.
+// 401/403 errors from Kimai are prefixed with [AUTH_INVALID] so the frontend
+// can distinguish a stale/revoked API key from other errors.
 const withKimai = async (req, fn) => {
   const accountId = req.context.accountId;
   const { kimaiUrl, apiKey } = await getConfig(accountId);
   console.log(`[resolver] withKimai accountId=${accountId} kimaiUrl=${kimaiUrl} apiKey=${apiKey ? '***set***' : 'null'}`);
   if (!kimaiUrl) throw new Error('URL do Kimai não configurada. Contacte o administrador.');
   if (!apiKey) throw new Error('API Key não configurada. Informe sua chave no painel.');
-  return fn(kimaiUrl, apiKey);
+  try {
+    return await fn(kimaiUrl, apiKey);
+  } catch (e) {
+    if (e.status === 401 || e.status === 403) {
+      throw new Error(`[AUTH_INVALID] ${e.message}`);
+    }
+    throw e;
+  }
 };
 
 // ─── Admin config ─────────────────────────────────────────────────────────────
