@@ -6,6 +6,7 @@ import ForgeReconciler, {
   DatePicker,
   DynamicTable,
   Heading,
+  HelperMessage,
   Inline,
   Label,
   LoadingButton,
@@ -25,7 +26,6 @@ import ForgeReconciler, {
   Tabs,
   Text,
   Textfield,
-  TimePicker,
   useProductContext,
 } from '@forge/react';
 import { invoke } from '@forge/bridge';
@@ -48,6 +48,53 @@ const nowHHMM = (offsetMinutes = 0) => {
 };
 
 const toKimaiDatetime = (date, time) => `${date}T${time}:00`;
+
+// Parses flexible time input (e.g. "9", "930", "9:30", "9.30", "9h30", "9:30pm")
+// into a canonical 24h "HH:mm" string, mirroring Clockify's manual time entry
+// so the team doesn't have to relearn a stricter format. Returns null when the
+// input can't be interpreted as a valid time.
+const parseFlexibleTime = (raw) => {
+  const input = raw.trim().toLowerCase();
+  if (!input) return null;
+
+  const meridiemMatch = input.match(/^(.*?)\s*(am|pm)$/);
+  const meridiem = meridiemMatch ? meridiemMatch[2] : null;
+  const body = meridiemMatch ? meridiemMatch[1] : input;
+
+  const withSeparator = body.match(/^(\d{1,2})[:h.](\d{1,2})$/);
+  const digitsOnly = body.match(/^(\d{1,4})$/);
+
+  let hours;
+  let minutes;
+  if (withSeparator) {
+    hours = parseInt(withSeparator[1], 10);
+    minutes = parseInt(withSeparator[2], 10);
+  } else if (digitsOnly) {
+    const digits = digitsOnly[1];
+    if (digits.length <= 2) {
+      hours = parseInt(digits, 10);
+      minutes = 0;
+    } else if (digits.length === 3) {
+      hours = parseInt(digits.slice(0, 1), 10);
+      minutes = parseInt(digits.slice(1), 10);
+    } else {
+      hours = parseInt(digits.slice(0, 2), 10);
+      minutes = parseInt(digits.slice(2), 10);
+    }
+  } else {
+    return null;
+  }
+
+  if (meridiem) {
+    if (hours < 1 || hours > 12) return null;
+    if (meridiem === 'pm' && hours !== 12) hours += 12;
+    if (meridiem === 'am' && hours === 12) hours = 0;
+  }
+
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
+
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+};
 
 const toOption = (item) => ({ label: item.name, value: item.id });
 
@@ -256,7 +303,7 @@ const TimerStartModal = ({
               id="timer-desc"
               name="timerDescription"
               placeholder="No que você está trabalhando?"
-              value={description}
+              defaultValue={defaultDescription ?? ''}
               onChange={(e) => setDescription(e.target.value)}
             />
           </Stack>
@@ -288,6 +335,44 @@ const TimerStartModal = ({
   );
 };
 
+// ─── TimeInput ──────────────────────────────────────────────────────────────
+// Free-text time entry, validated/normalized on blur (Clockify-style) instead
+// of a stepped combobox, so shifts outside the usual 15-minute grid can be typed.
+const TimeInput = ({ id, label, value, onChange }) => {
+  const [text, setText] = useState(value);
+  const [invalid, setInvalid] = useState(false);
+
+  const commit = (raw) => {
+    const parsed = parseFlexibleTime(raw);
+    if (parsed) {
+      setText(parsed);
+      setInvalid(false);
+      onChange(parsed);
+    } else {
+      setInvalid(true);
+      onChange(null);
+    }
+  };
+
+  return (
+    <Stack space="space.050">
+      <Label labelFor={id}>{label}</Label>
+      <Textfield
+        id={id}
+        value={text}
+        placeholder="ex.: 9, 930, 9:30"
+        isInvalid={invalid}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={(e) => commit(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') e.target.blur();
+        }}
+      />
+      {invalid && <HelperMessage>Horário inválido</HelperMessage>}
+    </Stack>
+  );
+};
+
 // ─── ManualEntryForm ──────────────────────────────────────────────────────────
 
 const ManualEntryForm = ({
@@ -307,6 +392,9 @@ const ManualEntryForm = ({
   const [description, setDescription] = useState(defaultDescription ?? '');
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState(null);
+  // Bumped after a successful add to remount the (uncontrolled) description
+  // field and reset its displayed text back to defaultDescription.
+  const [descResetKey, setDescResetKey] = useState(0);
 
   const canAdd = project && activity && date && startTime && endTime;
 
@@ -323,6 +411,7 @@ const ManualEntryForm = ({
         issueKey,
       });
       setDescription(defaultDescription ?? '');
+      setDescResetKey((k) => k + 1);
     } catch (e) {
       setError(e.message ?? 'Erro ao adicionar apontamento.');
     } finally {
@@ -337,14 +426,8 @@ const ManualEntryForm = ({
           <Label labelFor="man-date">Data</Label>
           <DatePicker id="man-date" value={date} onChange={(v) => setDate(v)} />
         </Stack>
-        <Stack space="space.050">
-          <Label labelFor="man-start">Início</Label>
-          <TimePicker id="man-start" value={startTime} onChange={(v) => setStartTime(v)} />
-        </Stack>
-        <Stack space="space.050">
-          <Label labelFor="man-end">Fim</Label>
-          <TimePicker id="man-end" value={endTime} onChange={(v) => setEndTime(v)} />
-        </Stack>
+        <TimeInput id="man-start" label="Início" value={startTime} onChange={setStartTime} />
+        <TimeInput id="man-end" label="Fim" value={endTime} onChange={setEndTime} />
       </Inline>
       <ProjectActivitySelects
         projects={projects}
@@ -355,10 +438,11 @@ const ManualEntryForm = ({
       />
       <Label labelFor="man-desc">Descrição</Label>
       <Textfield
+        key={descResetKey}
         id="man-desc"
         name="manualDescription"
         placeholder="Descrição do apontamento"
-        value={description}
+        defaultValue={defaultDescription ?? ''}
         onChange={(e) => setDescription(e.target.value)}
       />
       {error && (
